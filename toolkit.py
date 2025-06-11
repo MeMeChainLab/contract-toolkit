@@ -68,7 +68,8 @@ lib.normal_transaction.restype =  None
 
 lib.get_avaliable_asset.argtypes =  [
                            ctypes.c_char_p, 
-                           ctypes.c_int]
+                           ctypes.c_int,
+                           ctypes.c_char_p]
 lib.get_avaliable_asset.restype = ctypes.c_int
 
 class UtxoDeployer(ctypes.Structure):
@@ -87,7 +88,7 @@ CONTRACTDIR_DIRECTORY = Path("contractdir")
 OUTPUT_DIRECTORY = Path("output")
 CONFIG_FILE = Path("config.json")
 CONTRACT_MAP_FILE = Path("contractMap.txt")
-AVAILABLE_ASSET_TYPE = Path("availableAssetType.txt")
+AVAILABLE_ASSET_TYPE = Path("availableAssettype.txt")
 NODE_MODULES = Path("node_modules")
 DEFAULT_CONFIG = {
     'ip': '192.168.1.100',
@@ -134,7 +135,6 @@ def write_file_map(filename, lines):
             line_str = f"[{line[0]}, {line[1]}, {line[2]}, {line[3]}]\n"
             file.write(line_str)
 
-
 def display_asset_types(file_path):
     try:
         with open(file_path, 'r') as file:
@@ -144,9 +144,9 @@ def display_asset_types(file_path):
                 line = line.strip()
                 if line.startswith("hash:") and "asset name:" in line:
                     parts = line.split("asset name:")
-                    hash_part = parts[0].strip()
+                    hash_part = parts[0].replace("hash:", "").strip()
                     asset_name = parts[1].strip()
-                    print("{:<70} {:<10}".format(hash_part, asset_name))
+                    print("{:<72} {:<10}".format("hash: 0x" + hash_part, asset_name))
             print("-" * 85)
     except FileNotFoundError:
         print(f"Error: File {file_path} not found")
@@ -229,9 +229,9 @@ def autonormaltransaction(sendaddress,receiveaddress,assettype,otherassettype,am
     ip = ip.encode(encoding)
     lib.normal_transaction(sendaddress,receiveaddress,assettype,otherassettype,amount,pkey,ip,port,gastrade)
 
-def getavaliableasset(ip,port):
+def getavaliableasset(ip,port,addr):
     ip = ip.encode(encoding)
-    result = lib.get_avaliable_asset(ip,port)
+    result = lib.get_avaliable_asset(ip,port,addr)
     if result < 0:
         exit()
 
@@ -506,7 +506,8 @@ def auto_transtion(addr,long_pkey,config):
         if not is_valid_ethereum_address(receiveaddress):
             print("Invalid Ethereum address. Please try again.")
             continue  
-        break  
+        break
+    getavaliableasset(config['ip'], config['port'],addr)
     display_asset_types(AVAILABLE_ASSET_TYPE)
     assettype = input("Please enter the asset type to be transferred(hash): ")
 
@@ -561,8 +562,6 @@ def auto_call_contract(addr, long_pkey, config):
 
         state_changing_functions = []
         view_functions = []
-
-
         for func in functions:
             if func.get("stateMutability") in ["nonpayable", "payable"]:
                 state_changing_functions.append(func)
@@ -611,6 +610,7 @@ def auto_call_contract(addr, long_pkey, config):
                     print("Failed to generate calldata. Please try again.")
             else:
                 print("Invalid choice. Please select 0 or 1.")
+        getavaliableasset(config['ip'], config['port'],addr)
         display_asset_types(AVAILABLE_ASSET_TYPE)
         assettype = input("Please enter the type of asset you want to use to pay the gas (hash): ")
         autocall(addr, params, contractaddr, deployer, deployutxo, assettype,long_pkey, config['ip'], config['port'])
@@ -632,7 +632,7 @@ def auto_deploy_contract(address, long_pkey, config):
     bin_content = contract_info['bin']
     abi = contract_info['abi']
     print(f"Contract {contract_name_input} selected successfully.")
-
+    
     params = ""
     constructor_params = parse_abi_for_constructor(abi)
     if constructor_params:
@@ -654,6 +654,7 @@ def auto_deploy_contract(address, long_pkey, config):
                     print("Failed to generate calldata.")
             else:
                 print("Invalid choice. Please select 0 or 1.")
+    getavaliableasset(config['ip'], config['port'],address)
     display_asset_types(AVAILABLE_ASSET_TYPE)
     assettype = input("Please enter the type of asset you want to use to pay the gas (hash): ")
     contract_addr_utxo = autodeploy(bin_content, address, params,assettype ,long_pkey, config['ip'], config['port'])
@@ -697,9 +698,9 @@ def readkeystore():
         if selected_file not in json_files:
             print("Invalid choice")
             exit()
-    selected_file = selected_file.lstrip('0x') 
+    if selected_file.startswith('0x'):
+        selected_file = selected_file[2:]  
     file_path = os.path.join(KEY_STORE, selected_file + '.json')
-
     account_string = load_json_file(file_path)
     if account_string:
         account_c_char_p = ctypes.c_char_p(account_string.encode('utf-8'))
@@ -726,11 +727,12 @@ def inflow(address, long_pkey, config):
     deployer_value = deployer.deployer.decode()
     if not deployutxo or not deployer_value:
         print("UTXO or Deployer is empty")
-        return  
+        return
     function_selector = "0x6e27d889"  
     amount = int(input("Please enter the amount of tokens to inflow: "))
     inputs = [amount] 
-    params = generate_calldata(function_selector[2:], inputs) 
+    params = generate_calldata(function_selector[2:], inputs)
+    getavaliableasset(config['ip'], config['port'],address) 
     display_asset_types(AVAILABLE_ASSET_TYPE)
     assettype = input("Please enter the type of asset you want to use to pay the gas (hash): ")
     autocall(address, params, contractaddr, deployer_value, deployutxo, assettype,long_pkey, config['ip'], config['port'])
@@ -746,10 +748,12 @@ def outflow(address, long_pkey, config):
     if not deployutxo or not deployer_value:
         print("UTXO or Deployer is empty")
         return  
+    
     function_selector = "0x7c405325"  
     amount = int(input("Please enter the amount of tokens to outflow: "))
     inputs = [amount] 
-    params = generate_calldata(function_selector[2:], inputs) 
+    params = generate_calldata(function_selector[2:], inputs)
+    getavaliableasset(config['ip'], config['port'],address) 
     display_asset_types(AVAILABLE_ASSET_TYPE)
     assettype = input("Please enter the type of asset you want to use to pay the gas (hash): ")
     autocall(address, params, contractaddr, deployer_value, deployutxo, assettype,long_pkey, config['ip'], config['port'])
@@ -766,9 +770,11 @@ def other(address, long_pkey, config):
     if not deployutxo or not deployer_value:
         print("UTXO or Deployer is empty")
         return  
+    
     calldata = input("Please enter the calldata (without 0x prefix): ").strip()
     params = "0x" + calldata
     print(f"Manually provided calldata: {params}")
+    getavaliableasset(config['ip'], config['port'],address)
     display_asset_types(AVAILABLE_ASSET_TYPE)
     assettype = input("Please enter the type of asset you want to use to pay the gas (hash): ")
     autocall(address, params, contractaddr, deployer_value, deployutxo, assettype,long_pkey, config['ip'], config['port'])
@@ -791,7 +797,6 @@ def main():
         if(long_pkey < 0):
             exit()
         address = get_addr(long_pkey)
-        getavaliableasset(config['ip'], config['port'])
         while True: 
             print("\n============Menu===========")           
             print("0. Exit")
@@ -799,8 +804,9 @@ def main():
             print("2. Call contract")
             print("3. Deploy contract")
             print("4. InFlow")
-            print("5. OutFlow") 
-            choice = input("Please select an option (0/1/2/3/4/5): ").strip()
+            print("5. OutFlow")
+            print("6. Checking account balance") 
+            choice = input("Please select an option (0/1/2/3/4/5/6): ").strip()
             if choice == "1":
                 auto_transtion(address,long_pkey,config)
             elif choice == "2":
@@ -812,6 +818,9 @@ def main():
             elif choice == "5":  
                 outflow(address, long_pkey, config)
             elif choice == "6":  
+                getavaliableasset(config['ip'], config['port'],address)
+                display_asset_types(AVAILABLE_ASSET_TYPE)
+            elif choice == "99":  
                 other(address, long_pkey, config)
             elif choice == "0":
                 exit()
